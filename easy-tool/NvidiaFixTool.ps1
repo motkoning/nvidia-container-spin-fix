@@ -18,7 +18,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $PluginName = 'nvprofileupdaterplugin.dll'
-$ResultFile = Join-Path $env:TEMP 'NvidiaFixTool-worker-result.txt'
 
 # ------------------------------------------------------------ shared helpers
 function Get-NvSessionPluginDir {
@@ -33,46 +32,165 @@ function Get-NvSessionPluginDir {
 function Get-PluginState {
     $dir = Get-NvSessionPluginDir
     if (-not $dir) { return 'nodriver' }
-    if (Test-Path (Join-Path $dir "$PluginName.off")) { return 'fixed' }
-    if (Test-Path (Join-Path $dir $PluginName))       { return 'active' }
+
+    $stock = Test-Path (Join-Path $dir $PluginName)
+    $off = Test-Path (Join-Path $dir "$PluginName.off")
+
+    if ($stock -and $off) { return 'conflict' }
+    if ($off)             { return 'fixed' }
+    if ($stock)           { return 'active' }
     return 'missing'
 }
 
 function Get-MaxContainerCpu {
-    # Max per-instance CPU as % of total CPU over one 3s sample. -1 = no process.
+    # Two CIM snapshots produce one 3-second CPU window per matching process ID.
+    # Returns measured/no-process/failed; Maximum remains unrounded for verdicts.
     $cores = [Environment]::ProcessorCount
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $snapshots = @()
+
     try {
-        $s = (Get-Counter '\Process(nvdisplay.container*)\% Processor Time' -SampleInterval 3 -MaxSamples 1 -ErrorAction Stop).CounterSamples |
-            Where-Object { $_.InstanceName -ne '_total' }
-    } catch { return -1 }
-    if (-not $s) { return -1 }
-    return (($s | ForEach-Object { $_.CookedValue / $cores }) | Measure-Object -Maximum).Maximum
+        for ($sampleIndex = 0; $sampleIndex -lt 2; $sampleIndex++) {
+            if ($sampleIndex -gt 0) {
+                Start-Sleep -Seconds 3
+            }
+
+            $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'NVDisplay.Container.exe'" -ErrorAction Stop)
+            $snapshotTime = $clock.Elapsed.TotalSeconds
+            $processTimes = @{}
+
+            foreach ($process in $processes) {
+                $kernelTime = $process.KernelModeTime
+                $userTime = $process.UserModeTime
+                if ($null -eq $kernelTime -or $null -eq $userTime) {
+                    return [pscustomobject]@{
+                        Status = 'Failed'
+                        Maximum = $null
+                    }
+                }
+
+                $processTimes[[int]$process.ProcessId] = ([double]$kernelTime + [double]$userTime)
+            }
+
+            $snapshots += [pscustomobject]@{
+                Time = $snapshotTime
+                ProcessTimes = $processTimes
+            }
+        }
+    } catch {
+        return [pscustomobject]@{
+            Status = 'Failed'
+            Maximum = $null
+        }
+    } finally {
+        $clock.Stop()
+    }
+
+    $processSeen = $false
+    foreach ($snapshot in $snapshots) {
+        if ($snapshot.ProcessTimes.Count -gt 0) {
+            $processSeen = $true
+        }
+    }
+
+    if (-not $processSeen) {
+        return [pscustomobject]@{
+            Status = 'NoProcess'
+            Maximum = $null
+        }
+    }
+
+    $start = $snapshots[0]
+    $end = $snapshots[1]
+    $elapsedSeconds = $end.Time - $start.Time
+
+    if ($elapsedSeconds -le 0) {
+        return [pscustomobject]@{
+            Status = 'Failed'
+            Maximum = $null
+        }
+    }
+
+    $values = @()
+    foreach ($processId in $start.ProcessTimes.Keys) {
+        if ($end.ProcessTimes.ContainsKey($processId)) {
+            $cpuTime100ns = $end.ProcessTimes[$processId] - $start.ProcessTimes[$processId]
+            if ($cpuTime100ns -ge 0) {
+                $cpuSeconds = $cpuTime100ns / 10000000.0
+                $values += ($cpuSeconds / $elapsedSeconds / $cores * 100)
+            }
+        }
+    }
+
+    if ($values.Count -eq 0) {
+        return [pscustomobject]@{
+            Status = 'Failed'
+            Maximum = $null
+        }
+    }
+
+    return [pscustomobject]@{
+        Status = 'Measured'
+        Maximum = ($values | Measure-Object -Maximum).Maximum
+    }
 }
 
 # ------------------------------------------------------------- worker mode --
 if ($Worker) {
     try {
         $dir = Get-NvSessionPluginDir
-        if (-not $dir) { throw 'NVIDIA driver folder not found.' }
-        $stock = Join-Path $dir $PluginName
-        $off = "$stock.off"
+        $stock = $null
+        $off = $null
+
+        if (-not $dir) {
+            $state = 'nodriver'
+        } else {
+            $stock = Join-Path $dir $PluginName
+            $off = "$stock.off"
+            $stockExists = Test-Path $stock
+            $offExists = Test-Path $off
+
+            if ($stockExists -and $offExists) {
+                $state = 'conflict'
+            } elseif ($offExists) {
+                $state = 'fixed'
+            } elseif ($stockExists) {
+                $state = 'active'
+            } else {
+                $state = 'missing'
+            }
+        }
+
+        if ($state -eq 'nodriver') {
+            exit 4
+        }
+        if ($state -eq 'conflict') {
+            exit 6
+        }
+        if ($state -eq 'missing') {
+            exit 5
+        }
+
         if ($Worker -eq 'Fix') {
-            if (Test-Path $off) { Set-Content $ResultFile 'OK|Already fixed.'; exit 0 }
-            if (-not (Test-Path $stock)) { throw "$PluginName not found - unexpected driver layout." }
+            if ($state -eq 'fixed') {
+                exit 2
+            }
+
             foreach ($p in @($dir, $stock)) {
                 takeown.exe /f "$p" | Out-Null
-                icacls.exe "$p" /grant 'Administrators:F' | Out-Null
+                icacls.exe "$p" /grant '*S-1-5-32-544:F' | Out-Null
             }
             Rename-Item -LiteralPath $stock -NewName "$PluginName.off"
-            Set-Content $ResultFile 'OK|Fix applied.'
-        } else {
-            if (-not (Test-Path $off)) { Set-Content $ResultFile 'OK|Nothing to undo.'; exit 0 }
-            Rename-Item -LiteralPath $off -NewName $PluginName
-            Set-Content $ResultFile 'OK|Fix removed (back to original).'
+            exit 0
         }
+
+        if ($state -eq 'active') {
+            exit 3
+        }
+
+        Rename-Item -LiteralPath $off -NewName $PluginName
         exit 0
     } catch {
-        Set-Content $ResultFile ("ERR|" + $_.Exception.Message)
         exit 1
     }
 }
@@ -179,16 +297,34 @@ function Invoke-Diagnosis {
         'missing' { Add-Log 'Unusual driver layout: the plugin was not found at all.' }
     }
 
+    if ($script:pluginState -eq 'conflict') {
+        Set-Verdict 'Could not continue safely - conflicting plugin files were found.' ([System.Drawing.Color]::DarkOrange)
+        Add-Log 'A driver reinstall likely left a stale disabled copy next to a fresh active one.'
+        Add-Log "The tool won't guess which file to keep, so it will not apply or undo the fix."
+        Add-Log 'See the GitHub page below for guidance.'
+        return
+    }
+
     Add-Log 'Measuring NVIDIA Container CPU usage (3 seconds)...'
-    $cpu = Get-MaxContainerCpu
+    $measurement = Get-MaxContainerCpu
     $cores = [Environment]::ProcessorCount
     $oneCore = 100.0 / $cores
-    $spin = ($cpu -ge ($oneCore * 0.7))
-    if ($cpu -lt 0) {
+
+    if ($measurement.Status -eq 'NoProcess') {
         Add-Log 'NVIDIA Container is not currently running (service stopped?).'
-    } else {
-        Add-Log ("NVIDIA Container CPU right now: {0:n1}% of total CPU (one stuck core would show as ~{1:n1}%)." -f $cpu, $oneCore)
+        Set-Verdict 'Could not check - NVIDIA Container is not running.' ([System.Drawing.Color]::DarkOrange)
+        return
     }
+
+    if ($measurement.Status -eq 'Failed') {
+        Add-Log "NVIDIA Container CPU usage couldn't be measured."
+        Set-Verdict "Could not check - NVIDIA Container CPU usage couldn't be measured." ([System.Drawing.Color]::DarkOrange)
+        return
+    }
+
+    $cpu = $measurement.Maximum
+    $spin = ($cpu -ge ($oneCore * 0.7))
+    Add-Log ("NVIDIA Container CPU right now: {0:n1}% of total CPU (one stuck core would show as ~{1:n1}%)." -f $cpu, $oneCore)
 
     if ($spin -and $script:pluginState -eq 'active') {
         Set-Verdict 'Problem found - and this tool can fix it.' ([System.Drawing.Color]::Firebrick)
@@ -227,21 +363,66 @@ function Invoke-Diagnosis {
 }
 
 function Invoke-Worker([string]$action) {
-    Remove-Item $ResultFile -ErrorAction SilentlyContinue
     try {
-        $p = Start-Process powershell.exe -Verb RunAs -PassThru -Wait -WindowStyle Hidden -ArgumentList @(
+        $p = Start-Process powershell.exe -Verb RunAs -PassThru -WindowStyle Hidden -ArgumentList @(
             '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Worker', $action)
     } catch {
-        Add-Log 'Permission was declined - nothing was changed.'
-        return $false
+        Add-Log 'Permission was declined or the helper could not start - nothing was changed.'
+        return $null
     }
-    if (Test-Path $ResultFile) {
-        $parts = (Get-Content $ResultFile -Raw).Trim() -split '\|', 2
-        Add-Log $parts[1]
-        return ($parts[0] -eq 'OK')
+
+    try {
+        $p.WaitForExit()
+        $exitCode = $p.ExitCode
+    } catch {
+        Add-Log "The tool couldn't confirm what happened - restart your PC, then run this tool again to check."
+        return $null
     }
-    Add-Log 'The helper did not report a result - nothing may have changed.'
-    return $false
+
+    if ($null -eq $exitCode) {
+        Add-Log "The tool couldn't confirm what happened - restart your PC, then run this tool again to check."
+        return $null
+    }
+
+    switch ($exitCode) {
+        0 {
+            if ($action -eq 'Fix') {
+                Add-Log 'Fix applied.'
+            } else {
+                Add-Log 'Fix removed (back to original).'
+            }
+            return 0
+        }
+        1 {
+            Add-Log 'The helper reported an unexpected error. Restart your PC, then run this tool again to check.'
+            return 1
+        }
+        2 {
+            Add-Log 'The fix is already applied.'
+            return 2
+        }
+        3 {
+            Add-Log 'There is nothing to undo.'
+            return 3
+        }
+        4 {
+            Add-Log 'The NVIDIA driver folder was not found - nothing was changed.'
+            return 4
+        }
+        5 {
+            Add-Log 'The NVIDIA plugin file was not found - nothing was changed.'
+            return 5
+        }
+        6 {
+            Add-Log 'Both the active plugin and a disabled copy are present, probably after a driver reinstall.'
+            Add-Log "Nothing was changed because the tool won't guess which file to keep. See the GitHub page for guidance."
+            return 6
+        }
+        default {
+            Add-Log "The tool couldn't confirm what happened - restart your PC, then run this tool again to check."
+            return $exitCode
+        }
+    }
 }
 
 $actionBtn.Add_Click({
@@ -250,12 +431,40 @@ $actionBtn.Add_Click({
         Set-Verdict 'Restarting in 10 seconds... run this tool again afterwards to confirm.' ([System.Drawing.Color]::DarkOrange)
         return
     }
+
     $actionBtn.Enabled = $false
+    $recheckBtn.Enabled = $false
+    $consentMessage = @(
+        'This fix renames one NVIDIA file so it stops loading.'
+        'Nothing is deleted, and the "Undo the fix" button puts the file back.'
+        ''
+        'The only thing you lose is automatic game-profile updates between driver releases.'
+        ''
+        'If you continue, Windows will ask for permission next.'
+        'Restart your PC afterwards to finish the job.'
+        ''
+        'Apply the fix?'
+    ) -join [Environment]::NewLine
+
+    $consent = [System.Windows.Forms.MessageBox]::Show(
+        $form,
+        $consentMessage,
+        'Before applying the fix',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    )
+
+    if ($consent -ne [System.Windows.Forms.DialogResult]::Yes) {
+        Add-Log 'Nothing was changed.'
+        $actionBtn.Enabled = $true
+        $recheckBtn.Enabled = $true
+        return
+    }
+
     Add-Log ''
     Add-Log 'Applying the fix (Windows will ask for permission)...'
-    $ok = Invoke-Worker 'Fix'
-    $actionBtn.Enabled = $true
-    if ($ok) {
+    $exitCode = Invoke-Worker 'Fix'
+    if ($exitCode -eq 0 -or $exitCode -eq 2) {
         Set-Verdict 'Fix applied. Restart your PC to finish.' ([System.Drawing.Color]::FromArgb(21, 101, 192))
         Add-Log ''
         Add-Log 'IMPORTANT: restart your PC now. The stuck process cannot be'
@@ -264,15 +473,37 @@ $actionBtn.Add_Click({
         $actionBtn.Text = 'Restart PC now'
         $actionBtn.BackColor = [System.Drawing.Color]::FromArgb(21, 101, 192)
     }
+    $actionBtn.Enabled = $true
+    $recheckBtn.Enabled = $true
 })
 
 $undoBtn.Add_Click({
+    $undoBtn.Enabled = $false
+    $actionBtn.Enabled = $false
+    $recheckBtn.Enabled = $false
     Add-Log ''
     Add-Log 'Undoing the fix (Windows will ask for permission)...'
-    if (Invoke-Worker 'Revert') {
+    $exitCode = Invoke-Worker 'Revert'
+
+    if ($exitCode -eq 0) {
         Add-Log 'Restored. Restart your PC to re-enable the plugin.'
+        Set-Verdict 'Undo complete - restart your PC to finish.' ([System.Drawing.Color]::FromArgb(21, 101, 192))
+        $actionBtn.Text = 'Restart PC now'
+        $actionBtn.BackColor = [System.Drawing.Color]::FromArgb(21, 101, 192)
+        $actionBtn.ForeColor = [System.Drawing.Color]::White
+        $actionBtn.Visible = $true
+        $undoBtn.Visible = $false
+    } elseif ($exitCode -eq 3) {
         Invoke-Diagnosis
+    } elseif ($null -eq $exitCode) {
+        Set-Verdict 'Could not confirm what happened - see details below.' ([System.Drawing.Color]::DarkOrange)
+    } else {
+        Set-Verdict 'The undo was not performed - see details below.' ([System.Drawing.Color]::DarkOrange)
     }
+
+    $undoBtn.Enabled = $true
+    $actionBtn.Enabled = $true
+    $recheckBtn.Enabled = $true
 })
 
 $recheckBtn.Add_Click({ Invoke-Diagnosis })

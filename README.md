@@ -10,7 +10,7 @@ Easiest way, no technical skills needed: [NVIDIA-Container-Fix-EasyTool.zip](htt
 
 Command-line version: [Fix-NvContainerSpin.ps1](https://github.com/motkoning/nvidia-container-spin-fix/releases/latest/download/Fix-NvContainerSpin.ps1). Windows blocks downloaded scripts by default, so either unblock it (right-click → Properties → Unblock) or run it as:
 
-```
+```powershell
 powershell -ExecutionPolicy Bypass -File .\Fix-NvContainerSpin.ps1
 ```
 
@@ -41,6 +41,8 @@ It measures the container's per-process CPU, checks the plugin's state on disk, 
 
 That line is the container's watchdog catching the profile-updater plugin deadlocking. The abort it announces also fails, because the stuck thread is wedged in a kernel call.
 
+An in-place driver reinstall can leave both the stock `.dll` and the `.off` file present. The tool reports this conflict and declines to guess which file to keep.
+
 ## Root cause
 
 `NVDisplay.Container.exe` is a generic plugin host. The driver runs a service-level instance and a session instance; the session instance loads these plugins:
@@ -70,11 +72,13 @@ Manual equivalent, in an elevated PowerShell:
 
 ```powershell
 $dir = (Get-ChildItem 'C:\Windows\System32\DriverStore\FileRepository' -Directory -Filter 'nv_dispi.inf_amd64_*' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName + '\Display.NvContainer\plugins\Session'
-takeown /f $dir; icacls $dir /grant Administrators:F
-takeown /f "$dir\nvprofileupdaterplugin.dll"; icacls "$dir\nvprofileupdaterplugin.dll" /grant Administrators:F
+takeown /f $dir; icacls $dir /grant '*S-1-5-32-544:F'
+takeown /f "$dir\nvprofileupdaterplugin.dll"; icacls "$dir\nvprofileupdaterplugin.dll" /grant '*S-1-5-32-544:F'
 Rename-Item "$dir\nvprofileupdaterplugin.dll" 'nvprofileupdaterplugin.dll.off'
 # reboot
 ```
+
+The SID form works on every Windows language; localized group names such as `Administratoren` can break the old group-name form.
 
 The `takeown`/`icacls` on the folder matters: DriverStore contents belong to TrustedInstaller, and a rename needs write access to the parent directory, not just the file.
 
@@ -83,7 +87,42 @@ What you lose: automatic per-game profile updates delivered between driver relea
 To verify, after the reboot:
 
 ```powershell
-(Get-Counter '\Process(nvdisplay.container*)\% Processor Time' -SampleInterval 3 -MaxSamples 3).CounterSamples | % { '{0}: {1:n1}%' -f $_.InstanceName, ($_.CookedValue / [Environment]::ProcessorCount) }
+$cores = [Environment]::ProcessorCount
+$clock = [Diagnostics.Stopwatch]::StartNew()
+$before = @{}
+$badTimes = $false
+$first = @(Get-CimInstance Win32_Process -Filter "Name = 'NVDisplay.Container.exe'")
+$t0 = $clock.Elapsed.TotalSeconds
+foreach ($process in $first) {
+    if ($null -eq $process.KernelModeTime -or $null -eq $process.UserModeTime) {
+        $badTimes = $true
+    } else {
+        $before[[int]$process.ProcessId] = ([double]$process.KernelModeTime + [double]$process.UserModeTime)
+    }
+}
+Start-Sleep -Seconds 3
+$after = @{}
+$second = @(Get-CimInstance Win32_Process -Filter "Name = 'NVDisplay.Container.exe'")
+$t1 = $clock.Elapsed.TotalSeconds
+foreach ($process in $second) {
+    if ($null -eq $process.KernelModeTime -or $null -eq $process.UserModeTime) {
+        $badTimes = $true
+    } else {
+        $after[[int]$process.ProcessId] = ([double]$process.KernelModeTime + [double]$process.UserModeTime)
+    }
+}
+if ($first.Count -eq 0) {
+    Write-Host 'NVIDIA Container is not running - nothing to measure.'
+} elseif ($badTimes) {
+    Write-Host 'Could not read CPU times for NVIDIA Container.'
+} else {
+    foreach ($id in $before.Keys) {
+        if ($after.ContainsKey($id)) {
+            $cpuSeconds = ($after[$id] - $before[$id]) / 10000000.0
+            '{0} (PID {1}): {2:n1}%' -f 'NVDisplay.Container', $id, ($cpuSeconds / ($t1 - $t0) / $cores * 100)
+        }
+    }
+}
 ```
 
 All instances should read about 0%.

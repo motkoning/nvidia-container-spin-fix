@@ -12,7 +12,8 @@ HOW TO USE
    then "Run anyway"). The tool is a plain, readable script - you
    or anyone technical can open it in Notepad to see what it does.
 3. Follow the buttons. If the tool finds the problem, click
-   "Apply the fix" and click "Yes" when Windows asks for permission.
+   "Apply the fix", confirm in the window that explains what will
+   change, then click "Yes" when Windows asks for permission.
 4. RESTART your PC when the tool tells you to. That's it.
 
 The fix renames one NVIDIA plugin file so it no longer loads

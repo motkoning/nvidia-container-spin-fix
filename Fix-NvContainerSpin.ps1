@@ -26,8 +26,10 @@
     updates delivered between driver releases. Profiles still ship with every
     driver update. Control panel, game profiles, overlays etc. keep working.
 
-    NOTE: Installing/updating an NVIDIA driver restores the plugin. If the spin
-    returns after a driver update, run -Mode Fix again.
+    NOTE: CPU measurement uses locale-neutral CIM process-time deltas. Installing
+    or updating an NVIDIA driver restores the plugin; if both the stock and
+    .off files exist, the tool reports a conflict and leaves both untouched.
+    If the spin returns after a driver update, run -Mode Fix again.
 
 .NOTES
     Observed on: RTX 5070 Ti, driver 610.88, Windows 11. May apply to other
@@ -53,16 +55,106 @@ function Get-NvSessionPluginDir {
 }
 
 function Measure-ContainerCpu {
-    # Returns the max per-instance CPU (as % of total CPU) over two 3s samples.
+    # Returns measured/no-process/failed plus the maximum unrounded CPU value.
+    # Three CIM snapshots produce two consecutive 3-second windows per process ID.
     $cores = [Environment]::ProcessorCount
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $snapshots = @()
+
     try {
-        $samples = (Get-Counter '\Process(nvdisplay.container*)\% Processor Time' -SampleInterval 3 -MaxSamples 2 -ErrorAction Stop).CounterSamples |
-            Where-Object { $_.InstanceName -ne '_total' }
-    } catch { return $null }
-    if (-not $samples) { return $null }
-    $vals = $samples | ForEach-Object { [math]::Round($_.CookedValue / $cores, 1) }
-    Write-Host ("  NVDisplay.Container CPU samples (% of total CPU): " + ($vals -join '%, ') + '%')
-    return ($vals | Measure-Object -Maximum).Maximum
+        for ($sampleIndex = 0; $sampleIndex -lt 3; $sampleIndex++) {
+            if ($sampleIndex -gt 0) {
+                Start-Sleep -Seconds 3
+            }
+
+            $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'NVDisplay.Container.exe'" -ErrorAction Stop)
+            $snapshotTime = $clock.Elapsed.TotalSeconds
+            $processTimes = @{}
+
+            foreach ($process in $processes) {
+                $kernelTime = $process.KernelModeTime
+                $userTime = $process.UserModeTime
+                if ($null -eq $kernelTime -or $null -eq $userTime) {
+                    return [pscustomobject]@{
+                        Status = 'Failed'
+                        Maximum = $null
+                    }
+                }
+
+                $processTimes[[int]$process.ProcessId] = ([double]$kernelTime + [double]$userTime)
+            }
+
+            $snapshots += [pscustomobject]@{
+                Time = $snapshotTime
+                ProcessTimes = $processTimes
+            }
+        }
+    } catch {
+        return [pscustomobject]@{
+            Status = 'Failed'
+            Maximum = $null
+        }
+    } finally {
+        $clock.Stop()
+    }
+
+    $processSeen = $false
+    foreach ($snapshot in $snapshots) {
+        if ($snapshot.ProcessTimes.Count -gt 0) {
+            $processSeen = $true
+        }
+    }
+
+    if (-not $processSeen) {
+        return [pscustomobject]@{
+            Status = 'NoProcess'
+            Maximum = $null
+        }
+    }
+
+    $allValues = @()
+    for ($windowIndex = 0; $windowIndex -lt 2; $windowIndex++) {
+        $start = $snapshots[$windowIndex]
+        $end = $snapshots[$windowIndex + 1]
+        $elapsedSeconds = $end.Time - $start.Time
+        $windowValues = @()
+
+        if ($elapsedSeconds -le 0) {
+            return [pscustomobject]@{
+                Status = 'Failed'
+                Maximum = $null
+            }
+        }
+
+        foreach ($processId in $start.ProcessTimes.Keys) {
+            if ($end.ProcessTimes.ContainsKey($processId)) {
+                $cpuTime100ns = $end.ProcessTimes[$processId] - $start.ProcessTimes[$processId]
+                if ($cpuTime100ns -ge 0) {
+                    $cpuSeconds = $cpuTime100ns / 10000000.0
+                    $windowValues += ($cpuSeconds / $elapsedSeconds / $cores * 100)
+                }
+            }
+        }
+
+        if ($windowValues.Count -gt 0) {
+            $allValues += $windowValues
+            $displayValues = $windowValues |
+                ForEach-Object { [math]::Round($_, 1) }
+            Write-Host ("  NVDisplay.Container CPU sample {0} (% of total CPU): {1}%" -f ($windowIndex + 1), ($displayValues -join '%, '))
+        }
+    }
+
+    if ($allValues.Count -eq 0) {
+        return [pscustomobject]@{
+            Status = 'Failed'
+            Maximum = $null
+        }
+    }
+
+    return [pscustomobject]@{
+        Status = 'Measured'
+        Maximum = ($allValues | Measure-Object -Maximum).Maximum
+    }
 }
 
 function Test-IsAdmin {
@@ -74,7 +166,8 @@ function Test-IsAdmin {
 if ($Mode -eq 'Diagnose') {
     Write-Host "== NVIDIA container spin diagnosis ==" -ForegroundColor Cyan
     $cores = [Environment]::ProcessorCount
-    $oneCore = [math]::Round(100 / $cores, 1)
+    $oneCoreExact = 100.0 / $cores
+    $oneCore = [math]::Round($oneCoreExact, 1)
     Write-Host "  Logical processors: $cores (one pegged core shows as ~$oneCore% total CPU)"
 
     $dir = Get-NvSessionPluginDir
@@ -85,17 +178,33 @@ if ($Mode -eq 'Diagnose') {
     Write-Host "  Plugin folder: $dir"
 
     $stock = Test-Path (Join-Path $dir $PluginName)
-    $off   = Test-Path (Join-Path $dir "$PluginName.off")
-    if ($off)       { Write-Host "  Plugin state: DISABLED (.off) - fix is already applied." -ForegroundColor Green }
-    elseif ($stock) { Write-Host "  Plugin state: active (stock)" }
-    else            { Write-Host "  Plugin state: not present at all (unusual driver layout)" -ForegroundColor Yellow }
+    $off = Test-Path (Join-Path $dir "$PluginName.off")
+    $conflict = ($stock -and $off)
 
-    $max = Measure-ContainerCpu
-    if ($null -eq $max) {
-        Write-Host "  No NVDisplay.Container process running (service stopped or disabled?)." -ForegroundColor Yellow
-    } elseif ($max -ge ($oneCore * 0.7)) {
-        Write-Host "  SPIN DETECTED: an NVDisplay.Container process is burning ~one full core." -ForegroundColor Red
+    if ($conflict) {
+        Write-Host "  Plugin state: CONFLICT (stock and .off files are both present)." -ForegroundColor Yellow
+    } elseif ($off) {
+        Write-Host "  Plugin state: DISABLED (.off) - fix is already applied." -ForegroundColor Green
+    } elseif ($stock) {
+        Write-Host "  Plugin state: active (stock)"
     } else {
+        Write-Host "  Plugin state: not present at all (unusual driver layout)" -ForegroundColor Yellow
+    }
+
+    $measurement = Measure-ContainerCpu
+    $max = $null
+
+    if ($measurement.Status -eq 'NoProcess') {
+        Write-Host "  No NVDisplay.Container process running (service stopped or disabled?)." -ForegroundColor Yellow
+    } elseif ($measurement.Status -eq 'Failed') {
+        Write-Host "  Could not measure NVDisplay.Container CPU usage." -ForegroundColor Yellow
+    } else {
+        $max = $measurement.Maximum
+    }
+
+    if ($measurement.Status -eq 'Measured' -and $max -ge ($oneCoreExact * 0.7)) {
+        Write-Host "  SPIN DETECTED: an NVDisplay.Container process is burning ~one full core." -ForegroundColor Red
+    } elseif ($measurement.Status -eq 'Measured') {
         Write-Host "  No spin detected right now." -ForegroundColor Green
     }
 
@@ -107,9 +216,12 @@ if ($Mode -eq 'Diagnose') {
     }
 
     Write-Host ""
-    if (($max -ge ($oneCore * 0.7)) -and $stock) {
+    if ($conflict) {
+        Write-Host "Verdict: inconclusive - a driver reinstall likely left a stale disabled copy next to a fresh active one." -ForegroundColor Yellow
+        Write-Host "Do not run Fix or Revert; the tool will not guess which file to keep. See README and the GitHub issues page." -ForegroundColor Yellow
+    } elseif (($measurement.Status -eq 'Measured') -and ($max -ge ($oneCoreExact * 0.7)) -and $stock) {
         Write-Host "Verdict: this machine matches the bug. Run:  .\Fix-NvContainerSpin.ps1 -Mode Fix" -ForegroundColor Yellow
-    } elseif ($off -and $null -ne $max -and $max -lt 3) {
+    } elseif ($off -and ($measurement.Status -eq 'Measured') -and $max -lt ($oneCoreExact * 0.7)) {
         Write-Host "Verdict: fix applied and working." -ForegroundColor Green
     } else {
         Write-Host "Verdict: inconclusive - see README ('Is this my problem?') before applying the fix."
@@ -118,16 +230,33 @@ if ($Mode -eq 'Diagnose') {
 }
 
 # ------------------------------------------------------------- Fix / Revert --
-if (-not (Test-IsAdmin)) {
-    Write-Host "Elevation required - relaunching as administrator (accept the UAC prompt)..."
-    Start-Process powershell.exe -Verb RunAs -ArgumentList @('-NoExit', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-Mode', $Mode)
-    return
-}
-
 $dir = Get-NvSessionPluginDir
 if (-not $dir) { throw 'NVIDIA display driver not found in DriverStore.' }
 $stockPath = Join-Path $dir $PluginName
-$offPath   = "$stockPath.off"
+$offPath = "$stockPath.off"
+
+if ((Test-Path $stockPath) -and (Test-Path $offPath)) {
+    Write-Host 'Conflict: the stock plugin and its .off copy are both present.' -ForegroundColor Yellow
+    Write-Host 'A driver reinstall likely left a stale disabled copy next to a fresh active one.' -ForegroundColor Yellow
+    Write-Host 'No files were changed. The tool will not guess which file to keep; see README and the GitHub issues page.' -ForegroundColor Yellow
+    return
+}
+
+if (($Mode -eq 'Fix') -and (Test-Path $offPath)) {
+    Write-Host 'Already fixed (plugin is .off). Nothing to do.' -ForegroundColor Green
+    return
+}
+
+if (($Mode -eq 'Revert') -and (-not (Test-Path $offPath))) {
+    Write-Host 'Nothing to revert (no .off file found).' -ForegroundColor Green
+    return
+}
+
+if (-not (Test-IsAdmin)) {
+    Write-Host "Elevation required - relaunching as administrator (accept the UAC prompt)..."
+    Start-Process powershell.exe -Verb RunAs -ArgumentList @('-NoExit', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath), '-Mode', $Mode)
+    return
+}
 
 if ($Mode -eq 'Fix') {
     if (Test-Path $offPath) { Write-Host 'Already fixed (plugin is .off). Nothing to do.' -ForegroundColor Green; return }
@@ -142,7 +271,7 @@ if ($Mode -eq 'Fix') {
     # parent folder AND the file (a rename needs write access to both).
     foreach ($p in @($dir, $stockPath)) {
         takeown.exe /f "$p" | Out-Null
-        icacls.exe "$p" /grant 'Administrators:F' | Out-Null
+        icacls.exe "$p" /grant '*S-1-5-32-544:F' | Out-Null
     }
     Rename-Item -LiteralPath $stockPath -NewName "$PluginName.off"
     Write-Host "Done: $PluginName -> $PluginName.off" -ForegroundColor Green
