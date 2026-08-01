@@ -6,6 +6,10 @@ Observed and verified on: **RTX 5070 Ti, driver 610.88, Windows 11 (26200)**. Li
 
 ## Download
 
+**Easiest way (no tech skills needed):**
+**[⬇ NVIDIA-Container-Fix-EasyTool.zip](https://github.com/motkoning/nvidia-container-spin-fix/releases/latest/download/NVIDIA-Container-Fix-EasyTool.zip)** — extract it anywhere and double-click **`START-HERE.bat`**. A window checks your PC, tells you in plain English whether you have this bug, and fixes it with one button (plus an Undo button). If Windows shows a security warning, choose *Run* — it's a plain readable script, and you can open it in Notepad to verify.
+
+**Command-line way:**
 **[⬇ Fix-NvContainerSpin.ps1 (latest release)](https://github.com/motkoning/nvidia-container-spin-fix/releases/latest/download/Fix-NvContainerSpin.ps1)**
 
 After downloading, unblock the file (right-click → Properties → **Unblock**, or `Unblock-File .\Fix-NvContainerSpin.ps1`), then run it — see below. Windows blocks internet-downloaded scripts by default; alternatively run it with `powershell -ExecutionPolicy Bypass -File .\Fix-NvContainerSpin.ps1`.
