@@ -217,7 +217,7 @@ function Invoke-Diagnosis {
     } elseif (-not $spin -and $script:pluginState -eq 'active') {
         Set-Verdict "No problem detected right now." ([System.Drawing.Color]::ForestGreen)
         Add-Log ''
-        Add-Log 'Your NVIDIA Container is behaving normally. Nothing to do!'
+        Add-Log 'Your NVIDIA Container is behaving normally, so there is nothing to fix.'
         Add-Log 'If Task Manager sometimes shows the constant one-core usage anyway,'
         Add-Log 'click "Check again" while it is happening.'
     } else {
@@ -256,7 +256,7 @@ $actionBtn.Add_Click({
     $ok = Invoke-Worker 'Fix'
     $actionBtn.Enabled = $true
     if ($ok) {
-        Set-Verdict 'Fix applied! Restart your PC to finish.' ([System.Drawing.Color]::FromArgb(21, 101, 192))
+        Set-Verdict 'Fix applied. Restart your PC to finish.' ([System.Drawing.Color]::FromArgb(21, 101, 192))
         Add-Log ''
         Add-Log 'IMPORTANT: restart your PC now. The stuck process cannot be'
         Add-Log 'stopped any other way. After the restart, run this tool again'
