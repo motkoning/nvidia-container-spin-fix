@@ -4,6 +4,12 @@
 
 Observed and verified on: **RTX 5070 Ti, driver 610.88, Windows 11 (26200)**. Likely affects other configurations — the diagnostic tells you if it's your problem. If it matches (or doesn't) on your setup, please open an issue with your GPU/driver version so others can see the affected range.
 
+## Download
+
+**[⬇ Fix-NvContainerSpin.ps1 (latest release)](https://github.com/motkoning/nvidia-container-spin-fix/releases/latest/download/Fix-NvContainerSpin.ps1)**
+
+After downloading, unblock the file (right-click → Properties → **Unblock**, or `Unblock-File .\Fix-NvContainerSpin.ps1`), then run it — see below. Windows blocks internet-downloaded scripts by default; alternatively run it with `powershell -ExecutionPolicy Bypass -File .\Fix-NvContainerSpin.ps1`.
+
 ---
 
 ## Symptoms
