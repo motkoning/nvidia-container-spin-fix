@@ -10,3 +10,8 @@
   directly — no ceremony. When unsure, enter `/TRIP-1-plan`; its Step 0 triage proposes
   the lightweight path.
 - Second opinions on designs, hypotheses, trade-offs → `codex-ask` (advisory, cheap).
+- INVARIANT (survives compaction — re-read after any context summary): non-trivial
+  implementation is DISPATCHED to Codex workers via the skill scripts, never hand-written.
+  If you notice yourself directly editing source for planned/feature work, or writing a
+  plan nobody reviewed, STOP — you have drifted off the workflow (this happens after
+  compaction). Re-open the relevant skill under `.claude/skills/` and re-enter it.
