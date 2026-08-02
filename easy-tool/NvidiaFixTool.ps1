@@ -420,7 +420,7 @@ function Invoke-Worker([string]$action) {
         }
         default {
             Add-Log "The tool couldn't confirm what happened - restart your PC, then run this tool again to check."
-            return $exitCode
+            return $null
         }
     }
 }
@@ -472,6 +472,10 @@ $actionBtn.Add_Click({
         Add-Log 'to confirm everything is healthy.'
         $actionBtn.Text = 'Restart PC now'
         $actionBtn.BackColor = [System.Drawing.Color]::FromArgb(21, 101, 192)
+    } elseif ($null -eq $exitCode) {
+        Set-Verdict 'Could not confirm what happened - see details below.' ([System.Drawing.Color]::DarkOrange)
+    } else {
+        Set-Verdict 'The fix was not applied - see details below.' ([System.Drawing.Color]::DarkOrange)
     }
     $actionBtn.Enabled = $true
     $recheckBtn.Enabled = $true
