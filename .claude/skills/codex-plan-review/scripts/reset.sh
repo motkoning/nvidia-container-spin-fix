@@ -17,9 +17,10 @@ fi
 THREAD_FILE="$(thread_file "$1")"
 REVIEW_FILE="$(review_file "$1")"
 EVENTS_FILE="$(events_file "$1")"
+VERDICT_FILE="$(verdict_file "$1")"
 
 removed=0
-for f in "$THREAD_FILE" "$REVIEW_FILE" "$EVENTS_FILE" "$EVENTS_FILE.stderr"; do
+for f in "$THREAD_FILE" "$REVIEW_FILE" "$EVENTS_FILE" "$EVENTS_FILE.stderr" "$VERDICT_FILE"; do
     if [ -f "$f" ]; then
         rm -- "$f"
         echo "removed $f"

@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "required": ["verdict", "report"],
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["IMPLEMENTATION_COMPLETE", "IMPLEMENTATION_PARTIAL"],
+      "description": "The single trailing tag your instructions asked you to end with."
+    },
+    "report": {
+      "type": "string",
+      "description": "Your complete implementation report exactly as instructed - files changed, deviations, anything left undone. Everything except the tag itself."
+    }
+  }
+}

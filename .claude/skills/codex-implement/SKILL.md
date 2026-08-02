@@ -26,8 +26,8 @@ export STATE_DIR=".claude/skills/codex-implement/state"
 1. **Parse `$ARGUMENTS`**: extract action (`reset`/`show`/auto) and target.
 
 2. **Auto** — try `start.sh` first (exit code 2 = thread exists → use `resume.sh`):
-   - **Start**: `bash .claude/skills/codex-implement/scripts/start.sh --prompt-file .claude/skills/codex-implement/prompts/implement.tpl <target> [instructions]`
-   - **Resume** (next batch / additional scope): `bash .claude/skills/codex-plan-review/scripts/resume.sh --prompt-file .claude/skills/codex-implement/prompts/continue.tpl [--notes "review corrections"] <target> [instructions]`
+   - **Start**: `bash .claude/skills/codex-implement/scripts/start.sh --prompt-file .claude/skills/codex-implement/prompts/implement.tpl --output-schema .claude/skills/codex-implement/schemas/report.json <target> [instructions]`
+   - **Resume** (next batch / additional scope): `bash .claude/skills/codex-plan-review/scripts/resume.sh --prompt-file .claude/skills/codex-implement/prompts/continue.tpl --output-schema .claude/skills/codex-implement/schemas/report.json [--notes "review corrections"] <target> [instructions]`
 
 3. **Reset**: `bash .claude/skills/codex-plan-review/scripts/reset.sh <target>`
 

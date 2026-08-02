@@ -14,6 +14,7 @@ source "$SCRIPT_DIR/_common.sh"
 PROMPT_FILE=""
 IMPLEMENTER_NOTES=""
 IMAGE_ARGS=()
+SCHEMA_ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --prompt-file)
@@ -28,6 +29,10 @@ while [ $# -gt 0 ]; do
             IMAGE_ARGS+=("-i" "$2"); shift 2 ;;
         --image=*)
             IMAGE_ARGS+=("-i" "${1#*=}"); shift ;;
+        --output-schema)
+            SCHEMA_ARGS+=("--output-schema" "$2"); shift 2 ;;
+        --output-schema=*)
+            SCHEMA_ARGS+=("--output-schema" "${1#*=}"); shift ;;
         --) shift; break ;;
         -*)
             echo "error: unknown flag: $1" >&2; exit 64 ;;
@@ -62,6 +67,7 @@ PROMPT="$(load_prompt "$PROMPT_FILE")"
 codex exec resume "$THREAD_ID" \
     --skip-git-repo-check \
     --json \
+    "${SCHEMA_ARGS[@]}" \
     "${IMAGE_ARGS[@]}" \
     -c model="$CODEX_MODEL" \
     -c model_reasoning_effort="$CODEX_EFFORT" \
@@ -81,6 +87,7 @@ codex exec resume "$THREAD_ID" \
     }
 
 log_usage "$EVENTS_FILE"
+extract_structured "$REVIEW_FILE" "$(verdict_file "$TARGET")"
 
 echo "resumed review session for $TARGET"
 echo "  thread id:   $THREAD_ID"

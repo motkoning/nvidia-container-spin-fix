@@ -85,6 +85,7 @@ read only by Claude. Anything with design surface goes to Codex for that reason 
 ```bash
 bash .claude/skills/codex-implement/scripts/start.sh \
     --prompt-file .claude/skills/codex-implement/prompts/implement.tpl \
+    --output-schema .claude/skills/codex-implement/schemas/report.json \
     <plan-path> "Implement only: <batch-1 checkboxes>"   # or omit instructions to one-shot a small plan
 ```
 
@@ -94,6 +95,7 @@ bash .claude/skills/codex-implement/scripts/start.sh \
 export STATE_DIR=".claude/skills/codex-implement/state"
 bash .claude/skills/codex-plan-review/scripts/resume.sh \
     --prompt-file .claude/skills/codex-implement/prompts/continue.tpl \
+    --output-schema .claude/skills/codex-implement/schemas/report.json \
     --notes "<what you fixed after the last batch and why; conventions to apply from now on>" \
     <plan-path> "Now implement: <next batch checkboxes>"
 ```
@@ -144,6 +146,7 @@ none gets the others' — that is the trade being made):
 ```bash
 cd "$CLONE" && bash "$ROOT/.claude/skills/codex-implement/scripts/start.sh" \
     --prompt-file "$ROOT/.claude/skills/codex-implement/prompts/implement.tpl" \
+    --output-schema "$ROOT/.claude/skills/codex-implement/schemas/report.json" \
     "$CLONE" "Implement only: <batch checkboxes>. Conventions in force: <notes snapshot>"
 ```
 

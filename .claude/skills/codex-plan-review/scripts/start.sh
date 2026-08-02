@@ -14,6 +14,7 @@ source "$SCRIPT_DIR/_common.sh"
 
 PROMPT_FILE=""
 IMAGE_ARGS=()
+SCHEMA_ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --prompt-file)
@@ -24,6 +25,10 @@ while [ $# -gt 0 ]; do
             IMAGE_ARGS+=("-i" "$2"); shift 2 ;;
         --image=*)
             IMAGE_ARGS+=("-i" "${1#*=}"); shift ;;
+        --output-schema)
+            SCHEMA_ARGS+=("--output-schema" "$2"); shift 2 ;;
+        --output-schema=*)
+            SCHEMA_ARGS+=("--output-schema" "${1#*=}"); shift ;;
         --) shift; break ;;
         -*)
             echo "error: unknown flag: $1" >&2; exit 64 ;;
@@ -59,6 +64,7 @@ PROMPT="$(load_prompt "$PROMPT_FILE")"
 codex exec \
     --json \
     -p "$CODEX_PROFILE" \
+    "${SCHEMA_ARGS[@]}" \
     "${IMAGE_ARGS[@]}" \
     --skip-git-repo-check \
     --sandbox read-only \
@@ -79,6 +85,7 @@ codex exec \
     }
 
 log_usage "$EVENTS_FILE"
+extract_structured "$REVIEW_FILE" "$(verdict_file "$TARGET")"
 
 # Capture thread_id from the first thread.started event.
 # (Windows: jq-free — Git Bash on Windows has no jq. Split on '"' and take

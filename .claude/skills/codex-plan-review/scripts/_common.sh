@@ -135,6 +135,43 @@ events_file() {
     printf '%s/%s.events.ndjson' "$STATE_DIR" "$(target_key "$1")"
 }
 
+verdict_file() {
+    printf '%s/%s.verdict' "$STATE_DIR" "$(target_key "$1")"
+}
+
+# When a structured output schema was used (--output-schema), the -o file
+# holds JSON: {verdict, report}. Split it — machine-readable verdict to a
+# sidecar, prose back into the report file WITH the verdict re-appended as
+# the familiar trailing tag, so every existing tag parser, show.sh replay,
+# and CR promotion keeps working unchanged; the schema just makes the tag
+# guaranteed instead of prompt-disciplined. Python, not jq: the kit's floor
+# is jq-free Git Bash + Python (SETUP §0). No-op when no schema was passed
+# or the file isn't JSON (model fallback) — never fails the calling script.
+extract_structured() {
+    local file="$1" sidecar="$2"
+    [ "${#SCHEMA_ARGS[@]}" -gt 0 ] 2>/dev/null || return 0
+    python - "$file" "$sidecar" <<'PYEOF' || true
+import json, sys
+path, sidecar = sys.argv[1], sys.argv[2]
+try:
+    d = json.load(open(path, encoding="utf-8"))
+except Exception:
+    sys.exit(0)
+if not isinstance(d, dict):
+    sys.exit(0)
+verdict = str(d.get("verdict", "") or "")
+report = str(d.get("report", "") or "")
+if report or verdict:
+    body = report.rstrip()
+    if verdict and not body.endswith(verdict):
+        body = (body + "\n\n" if body else "") + verdict
+    open(path, "w", encoding="utf-8").write(body + "\n")
+if verdict:
+    open(sidecar, "w", encoding="utf-8").write(verdict + "\n")
+    print("  verdict: " + verdict)
+PYEOF
+}
+
 # Load a prompt template from $1 and substitute {{TARGET}} and
 # {{EXTRA_PROMPT}} placeholders with the values of the $TARGET and
 # $EXTRA_PROMPT environment variables. Other text passes through

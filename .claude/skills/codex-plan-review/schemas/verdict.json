@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "required": ["verdict", "report"],
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["APPROVED", "REQUEST_CHANGES", "NEEDS_REWORK"],
+      "description": "The single trailing tag your instructions asked you to end with."
+    },
+    "report": {
+      "type": "string",
+      "description": "Your complete review exactly as instructed - full prose, findings, file:line anchors. Everything except the tag itself."
+    }
+  }
+}

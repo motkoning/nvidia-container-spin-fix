@@ -205,7 +205,7 @@ Skip for trivial plans (single-file, low-risk). Run for non-trivial (new module,
 
 ### Loop
 
-1. **Start**: `bash .claude/skills/codex-plan-review/scripts/start.sh --prompt-file .claude/skills/codex-plan-review/prompts/start.tpl <plan-path>`
+1. **Start**: `bash .claude/skills/codex-plan-review/scripts/start.sh --prompt-file .claude/skills/codex-plan-review/prompts/start.tpl --output-schema .claude/skills/codex-plan-review/schemas/verdict.json <plan-path>`
 2. **Parse trailing tag**: `APPROVED` -> Step 4. `NEEDS_REWORK` -> surface to user. `REQUEST_CHANGES` -> continue.
 3. **Address findings critically** — quote each P1/P2, push back on incorrect ones, fix legitimate ones by editing the plan in place.
 4. **Write implementer notes** (1-3 sentences): which findings you fixed, which you pushed back on and why, any user decisions that override existing docs or environment limitations that can't be resolved in the plan.
@@ -213,6 +213,7 @@ Skip for trivial plans (single-file, low-risk). Run for non-trivial (new module,
    ```bash
    bash .claude/skills/codex-plan-review/scripts/resume.sh \
        --prompt-file .claude/skills/codex-plan-review/prompts/resume.tpl \
+       --output-schema .claude/skills/codex-plan-review/schemas/verdict.json \
        --notes "Fixed X. Pushed back on Y because Z. User decided W." \
        <plan-path>
    ```
