@@ -13,6 +13,7 @@ source "$SCRIPT_DIR/_common.sh"
 
 PROMPT_FILE=""
 IMPLEMENTER_NOTES=""
+IMAGE_ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --prompt-file)
@@ -23,6 +24,10 @@ while [ $# -gt 0 ]; do
             IMPLEMENTER_NOTES="$2"; shift 2 ;;
         --notes=*)
             IMPLEMENTER_NOTES="${1#*=}"; shift ;;
+        --image)
+            IMAGE_ARGS+=("-i" "$2"); shift 2 ;;
+        --image=*)
+            IMAGE_ARGS+=("-i" "${1#*=}"); shift ;;
         --) shift; break ;;
         -*)
             echo "error: unknown flag: $1" >&2; exit 64 ;;
@@ -31,7 +36,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$PROMPT_FILE" ] || [ $# -lt 1 ]; then
-    echo "usage: resume.sh --prompt-file <tpl> [--notes '...'] <target> [extra prompt text...]" >&2
+    echo "usage: resume.sh --prompt-file <tpl> [--notes '...'] [--image <file>]... <target> [extra prompt text...]" >&2
     exit 64
 fi
 
@@ -57,6 +62,7 @@ PROMPT="$(load_prompt "$PROMPT_FILE")"
 codex exec resume "$THREAD_ID" \
     --skip-git-repo-check \
     --json \
+    "${IMAGE_ARGS[@]}" \
     -c model="$CODEX_MODEL" \
     -c model_reasoning_effort="$CODEX_EFFORT" \
     -c service_tier="$CODEX_SERVICE_TIER" \

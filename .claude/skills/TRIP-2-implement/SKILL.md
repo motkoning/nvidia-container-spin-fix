@@ -51,32 +51,34 @@ Read the plan fully and split its to-dos into batches. You are the judge of batc
 
 ### 2. Delegate batch by batch
 
-**Route each batch before dispatching it.** Reasoning tokens are ~60% of worker output and
-they are pure waiting, so deliberation spent on a decision-free batch buys nothing. Default
-to Sol; step down only when the batch genuinely has no decisions left in it.
+**Routing (rebalanced 2026-08-02 — REPORT-2026-08-02): every dispatched batch runs
+Terra @ high, the `_common.sh` default — no env prefix, no per-batch model stepping.**
+The full benchmark program (July 36-cell grid + T5 design-surface + multi-batch) found
+implementation quality saturated across every model and effort level on every class
+tested, with terra-high fastest in every measurement; per-batch routing ceremony
+therefore bought decision latency and nothing else. Two lanes survive:
 
-| Batch | Route | When |
-|---|---|---|
-| **Design-surface / hard** — new logic where the plan describes *what* without pinning *how*, tricky edge-case work, anything security- or data-critical | **Sol @ high** (the default — no env prefix) | Everything not clearly in the rows below |
-| **Well-specified standard** — real feature work, but the plan pins the *how*: names, semantics, formats, placement all decided | `CODEX_MODEL=gpt-5.6-luna CODEX_EFFORT=high` | Benchmarked 2026-07-30, 36-cell grid: on this class quality saturated across every model and effort tested — Luna @ high matched Sol @ xhigh's review profile at a fraction of the cost, and xhigh bought Luna no measurable quality over high. Below high is untested for this lane. The escalate-on-failure rule is the safety net that keeps this cheap routing safe |
-| **Mechanical** — apply an established pattern to further modules, bulk renames, boilerplate, wiring imports | `CODEX_MODEL=gpt-5.6-luna CODEX_EFFORT=medium` | Only when you can state the batch as "this is just typing" |
-| **Trivial** — a couple of lines in one file, no design | **Do it yourself, no dispatch** | A Codex round-trip costs ~1–2 min of fixed overhead; below that the dispatch costs more than the work |
+| Batch | Route |
+|---|---|
+| **Anything dispatchable** — design-surface, standard, mechanical alike | **Terra @ high** (the default — just dispatch) |
+| **Trivial** — a couple of lines in one file, no design | **Do it yourself, no dispatch** — a Codex round-trip costs ~1–2 min of fixed overhead; below that the dispatch costs more than the work |
 
-**Escalate on failure, don't patch over it**: if a Luna batch comes back wrong — misapplied
-the pattern, missed files, needed conventions re-explained — redo the batch at
-Sol @ high rather than hand-fixing it. Misclassification is expected and cheap; quietly
-repairing a bad batch hides the signal and costs more than the redo. (This rule is what
-makes the Luna lanes safe to use liberally.)
+(`CODEX_MODEL=gpt-5.6-luna` remains one override away where token cost is the binding
+constraint; `gpt-5.6-sol` likewise if a batch seems to warrant it — but measure before
+believing it did.)
 
-**Two things the step-down does not change**: mixing models inside one thread is fine (the
-model is passed on every turn and the cached context carries across), and every batch still
-gets the same line-by-line delta review in step 3 — routing changes who types, never who
-checks.
+**Redo on failure, don't patch over it**: if a batch comes back wrong — misapplied the
+pattern, missed files, needed conventions re-explained — redo it on the same thread with
+sharper `--notes` rather than hand-fixing. Quietly repairing a bad batch hides the
+signal and costs more than the redo.
 
-**On doing it yourself**: keep this for genuinely trivial work. Batches you implement lose
-the cross-vendor property that makes the delta review meaningful (Sol writes, Claude
-reviews) — your own code reaches the final gate having been read only by Claude. Anything
-with design surface goes to Codex for that reason alone.
+**Unchanged by any routing**: every batch still gets the same line-by-line delta review
+in step 3 — routing changes who types, never who checks.
+
+**On doing it yourself**: keep this for genuinely trivial work. Batches you implement
+lose the cross-vendor property that makes the delta review meaningful (Terra writes;
+Claude and, at the gate, Opus review) — your own code reaches the final gate having been
+read only by Claude. Anything with design surface goes to Codex for that reason alone.
 
 **Start** the session with the first batch (state dir is handled by the script):
 
@@ -90,7 +92,6 @@ bash .claude/skills/codex-implement/scripts/start.sh \
 
 ```bash
 export STATE_DIR=".claude/skills/codex-implement/state"
-# mechanical batch? prefix: CODEX_MODEL=gpt-5.6-luna CODEX_EFFORT=medium
 bash .claude/skills/codex-plan-review/scripts/resume.sh \
     --prompt-file .claude/skills/codex-implement/prompts/continue.tpl \
     --notes "<what you fixed after the last batch and why; conventions to apply from now on>" \
@@ -102,6 +103,64 @@ The script echoes the effective `model/effort/tier` — check it matches the rou
 **Parse the trailing tag** of each report:
 - `IMPLEMENTATION_COMPLETE` → review the batch (below).
 - `IMPLEMENTATION_PARTIAL` → read the report; resume with instructions for the remainder, or finish small leftovers yourself during the batch review.
+
+### 2b. Parallel dispatch (opt-in — sequential is the default for a reason)
+
+At terra-high speeds, sequential batching is already near the wall-clock floor for most
+features: builds run 30–90s on well-pinned batches, your delta review takes longer than
+the build, and the notes-compounding loop (review N → corrections ride into N+1) is what
+keeps quality churn-free — the multi-batch bench measured zero convention decay across
+18 sequential batches. Parallelism speeds typing, never checking; misapplied, its
+overhead and redo churn make the feature *slower*. Therefore:
+
+**Engage parallel dispatch ONLY when the plan explicitly marks a parallel group** ("Parallel
+group: batches N+M — file sets: …") **and all three preconditions hold** (verify each,
+say so, and fall back to sequential if any fails):
+
+1. **Chunky builds** — every batch in the group is expected worker time ≥5 min (real
+   subsystem work, not mechanical passes). Below that, review dominates and clone/lift
+   overhead exceeds the savings.
+2. **Genuinely disjoint file sets** — intersect the plan's per-batch file lists yourself,
+   including the leak-prone shared touchpoints: `__init__`/exports, config, changelog,
+   shared headers. Any overlap → sequential.
+3. **Conventions already established** — never batches 1–2, never while patterns are
+   still being set. Parallel threads cannot learn from each other mid-flight.
+
+**Mechanics** (the explore lane's clone pattern, adapted for mid-feature state):
+
+```bash
+grep -qxF '.trip-spikes/' .gitignore 2>/dev/null || echo '.trip-spikes/' >> .gitignore
+ROOT="$(pwd)"; CLONE="$ROOT/.trip-spikes/par-<plan>-<batch>"
+mkdir -p "$CLONE" && git checkout-index -a --prefix="$CLONE/"   # staged state, not HEAD:
+git -C "$CLONE" init -q && git -C "$CLONE" add -A \
+    && git -C "$CLONE" commit -qm baseline                       # prior batches ride along
+```
+
+Dispatch each group member concurrently as a background task — fresh thread per clone,
+via `start.sh` run inside the clone with the batch instructions **plus the full
+conventions snapshot from your notes so far** (parallel threads all get the same notes;
+none gets the others' — that is the trade being made):
+
+```bash
+cd "$CLONE" && bash "$ROOT/.claude/skills/codex-implement/scripts/start.sh" \
+    --prompt-file "$ROOT/.claude/skills/codex-implement/prompts/implement.tpl" \
+    "$CLONE" "Implement only: <batch checkboxes>. Conventions in force: <notes snapshot>"
+```
+
+**Integration is strictly ordered and fully reviewed**: when the group lands, take the
+batches one at a time — `git -C "$CLONE" add -A && git -C "$CLONE" diff --cached >
+patch`, `git apply --3way patch` in the real tree, then the COMPLETE step-3 delta review
+(review, fix, micro-gate, explicit stage) before applying the next member. A conflict at
+apply time means precondition 2 was judged wrong — resolve it, note it, and treat the
+next parallel-group claim in this plan with suspicion. Afterwards: `reset.sh` each clone
+thread (usage.ndjson survives) and delete the clones.
+
+**Pipeline overlap** (the lighter variant, same spirit): while reviewing batch N you MAY
+resume-dispatch batch N+1 on the main thread early — only when N+1 is
+convention-independent of whatever N's review could find (different subsystem). Accept
+that N+1 launches with a one-batch note lag; if N's review turns up something
+structural, expect partial redo of N+1 and count that cost against the overlap. When in
+doubt, don't: the sequential loop is the kit's measured-quality baseline.
 
 ### 3. Review each batch (delta review)
 

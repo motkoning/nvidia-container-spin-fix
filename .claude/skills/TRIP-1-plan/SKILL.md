@@ -20,9 +20,9 @@ Plan the following feature: $ARGUMENTS
 
 ---
 
-## Step 0: Size and Shape Triage
+## Step 0: Size, Shape, and Maturity Triage
 
-Before any ceremony, judge the request on two axes — and say what you concluded.
+Before any ceremony, judge the request on three axes — and say what you concluded.
 
 **Size**: doc-only, config-only, or roughly under ~30 changed lines with no architectural
 impact → propose the lightweight path (implement directly or one-shot via codex-implement,
@@ -38,8 +38,15 @@ review needs an executable anchor to converge; on documents it manufactures find
 forever (measured: one ops project spent two days and 6,500 lines of proposals in review
 rounds, then shipped the entire build in six hours from a 168-line checklist).
 
+**Maturity — is the design settled?** A request can be big AND worker-implementable AND
+still not ready for this pipeline: if the user is exploring — unsure how they want it to
+work, wants options to compare, "something tangible to look at" — a plan would be a guess
+and every review round would polish that guess. Propose `/TRIP-explore` instead: 2-3
+fast parallel prototypes to react to, promotion to the full pipeline only after a winner
+settles the design. Planning resumes at `/TRIP-promote` with the design already decided.
+
 The user decides; full ceremony remains the default only for real, worker-implementable
-design surface.
+work whose design is settled.
 
 ---
 
@@ -164,6 +171,14 @@ Depending on the feature (major, minor, patch), propose a new version using SemV
 - [ ] Another task
 
 **Note**: For simple plans, a single phase is sufficient. Split into multiple phases only for complex features requiring sequential implementation.
+
+**Parallel groups (rare, opt-in)**: when two batches are BOTH chunky (≥5 min of worker
+build each) AND touch provably disjoint file sets (list them — include leak-prone shared
+touchpoints: exports/`__init__`, config, changelog) AND come after the pattern-setting
+early batches, you MAY mark them `Parallel group: <batch A> + <batch B> — file sets: …`
+so TRIP-2 can dispatch them concurrently (its §2b re-verifies all three preconditions
+before honoring the mark). Do not mark groups on small-batch plans — at terra-high
+speeds sequential is already near the floor, and unmarked plans are always sequential.
 
 **Note**: Do NOT write test code during planning — the Test Impact section above only names what the TRIP-2 testing gate will run and author.
 ```

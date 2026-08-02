@@ -1027,6 +1027,22 @@ Update: Technology Stack, and any affected architectural sections
 
 ---
 
+## Phase 8: Opportunity Scan (Optional)
+
+The one moment the whole codebase is fresh in context is now. **Use the
+`AskUserQuestion` tool** to offer:
+
+- **Question**: "Want a quick opportunity scan while the architecture is fresh? (~15-20
+  min: evidence-grounded observations + an adversarial Codex pass → a ranked menu of
+  possible improvements. The menu is informational — nothing gets built unless you
+  later pick an item.)"
+- **Options**: "Yes, scan" / "No, finish init"
+
+If yes: run `/TRIP-explore scan` (Entry B) and finish init after presenting the menu.
+If no: finish normally — the scan stays available anytime via `/TRIP-explore scan`.
+
+---
+
 ## Notes for the Agent
 
 - **Explore thoroughly**: Read key files to understand the project before classifying

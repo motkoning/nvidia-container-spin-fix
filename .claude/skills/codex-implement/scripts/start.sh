@@ -22,12 +22,17 @@ export STATE_DIR
 source "$SCRIPT_DIR/../../codex-plan-review/scripts/_common.sh"
 
 PROMPT_FILE=""
+IMAGE_ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --prompt-file)
             PROMPT_FILE="$2"; shift 2 ;;
         --prompt-file=*)
             PROMPT_FILE="${1#*=}"; shift ;;
+        --image)
+            IMAGE_ARGS+=("-i" "$2"); shift 2 ;;
+        --image=*)
+            IMAGE_ARGS+=("-i" "${1#*=}"); shift ;;
         --) shift; break ;;
         -*)
             echo "error: unknown flag: $1" >&2; exit 64 ;;
@@ -36,7 +41,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$PROMPT_FILE" ] || [ $# -lt 1 ]; then
-    echo "usage: start.sh --prompt-file <tpl> <target> [custom instructions…]" >&2
+    echo "usage: start.sh --prompt-file <tpl> [--image <file>]... <target> [custom instructions…]" >&2
     exit 64
 fi
 
@@ -62,6 +67,8 @@ PROMPT="$(load_prompt "$PROMPT_FILE")"
 # (lint/build); no network, no destructive access outside the workspace.
 codex exec \
     --json \
+    -p "$CODEX_PROFILE" \
+    "${IMAGE_ARGS[@]}" \
     --skip-git-repo-check \
     --sandbox workspace-write \
     --color never \

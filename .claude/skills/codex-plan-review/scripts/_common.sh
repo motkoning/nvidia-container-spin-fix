@@ -12,14 +12,19 @@ SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export STATE_DIR
 mkdir -p "$STATE_DIR"
 
-# Model/effort per flow (single source of truth for all codex skills):
-# implementation runs Sol at high, reviews (plan + code) run Sol at
-# xhigh. (Starter-kit default: upstream TRIP defaults implementation to
-# Luna; Sol proved a clearly stronger coder than Terra in practice.
-# Override per run via CODEX_MODEL / CODEX_EFFORT, e.g.
-# CODEX_MODEL=gpt-5.6-luna CODEX_EFFORT=medium for mechanical batches.)
+# Model/effort per flow (single source of truth for all codex skills).
+# Routing rebalanced 2026-08-02 on benchmark evidence (bench/reports/,
+# T5 + July grid): implementation quality is saturated across models AND
+# effort levels, and terra-high was fastest in every measurement — so
+# TERRA implements, SOL reviews. Sol @ xhigh for hardening reviews
+# (thoroughness over latency), Sol @ high for codex-ask (advisory speed).
+# Override per run via CODEX_MODEL / CODEX_EFFORT as ever.
 case "$STATE_DIR" in
     *codex-implement*)
+        CODEX_MODEL="${CODEX_MODEL:-gpt-5.6-terra}"
+        CODEX_EFFORT="${CODEX_EFFORT:-high}"
+        ;;
+    *codex-ask*)
         CODEX_MODEL="${CODEX_MODEL:-gpt-5.6-sol}"
         CODEX_EFFORT="${CODEX_EFFORT:-high}"
         ;;
@@ -28,11 +33,16 @@ case "$STATE_DIR" in
         CODEX_EFFORT="${CODEX_EFFORT:-xhigh}"
         ;;
 esac
-# Service tier (inference speed): pinned to priority so the desktop
-# app's speed toggle can't silently retune workers via the shared
-# ~/.codex/config.toml. Toggle down per run: CODEX_SERVICE_TIER=default
-CODEX_SERVICE_TIER="${CODEX_SERVICE_TIER:-priority}"
-export CODEX_MODEL CODEX_EFFORT CODEX_SERVICE_TIER
+# Service tier (inference speed): pinned to "fast" (the 2026-07-30 rename of
+# "priority") so the desktop app's speed toggle can't silently retune workers
+# via the shared ~/.codex/config.toml. Fast is ~1.5x speed at 2.5x credit burn
+# on ChatGPT plans — use CODEX_SERVICE_TIER=standard for bulk/benchmark runs.
+CODEX_SERVICE_TIER="${CODEX_SERVICE_TIER:-fast}"
+# Lean worker profile (~/.codex/worker.config.toml overlay): strips the desktop
+# plugin catalog from worker context (the "2% skills budget" tax). Applies on
+# session START only — `codex exec resume` rejects -p (verified 2026-08-02).
+CODEX_PROFILE="${CODEX_PROFILE:-worker}"
+export CODEX_MODEL CODEX_EFFORT CODEX_SERVICE_TIER CODEX_PROFILE
 
 # Append this run's token usage (the turn.completed events in $1) to
 # $STATE_DIR/usage.ndjson, tagged with timestamp, model, effort, and
