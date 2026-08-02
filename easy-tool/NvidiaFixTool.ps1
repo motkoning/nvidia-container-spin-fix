@@ -362,13 +362,17 @@ function Invoke-Diagnosis {
     }
 }
 
+# Returns: 0-6 = worker exit code | 'declined' = never launched | $null = outcome unknown.
+# Compare with -eq only (the sentinel is a string; relational/arithmetic ops would throw).
 function Invoke-Worker([string]$action) {
     try {
         $p = Start-Process powershell.exe -Verb RunAs -PassThru -WindowStyle Hidden -ArgumentList @(
             '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Worker', $action)
     } catch {
+        # Launch failure: the worker never started, so "nothing was changed" is
+        # a known fact here - unlike the readout failures below, which are not.
         Add-Log 'Permission was declined or the helper could not start - nothing was changed.'
-        return $null
+        return 'declined'
     }
 
     try {
@@ -472,6 +476,8 @@ $actionBtn.Add_Click({
         Add-Log 'to confirm everything is healthy.'
         $actionBtn.Text = 'Restart PC now'
         $actionBtn.BackColor = [System.Drawing.Color]::FromArgb(21, 101, 192)
+    } elseif ('declined' -eq $exitCode) {
+        Set-Verdict 'Nothing was changed - see details below.' ([System.Drawing.Color]::DarkOrange)
     } elseif ($null -eq $exitCode) {
         Set-Verdict 'Could not confirm what happened - see details below.' ([System.Drawing.Color]::DarkOrange)
     } else {
@@ -499,6 +505,8 @@ $undoBtn.Add_Click({
         $undoBtn.Visible = $false
     } elseif ($exitCode -eq 3) {
         Invoke-Diagnosis
+    } elseif ('declined' -eq $exitCode) {
+        Set-Verdict 'Nothing was changed - see details below.' ([System.Drawing.Color]::DarkOrange)
     } elseif ($null -eq $exitCode) {
         Set-Verdict 'Could not confirm what happened - see details below.' ([System.Drawing.Color]::DarkOrange)
     } else {

@@ -140,7 +140,7 @@ DriverStore contents belong to TrustedInstaller, so the rename needs ownership o
 Two different elevation shapes, on purpose:
 
 - **CLI**: if not admin, relaunches itself elevated (`Start-Process -Verb RunAs`, quoted script path) with the same `-Mode`, in a visible `-NoExit` console so the user sees the result. Conflict and no-op cases resolve **before** elevation. Diagnose never elevates.
-- **GUI**: stays unelevated for its whole life. Fix/Undo spawn a **hidden elevated worker** (`-Worker Fix|Revert`, `-Verb RunAs -WindowStyle Hidden -PassThru`). The worker communicates back **solely through its process exit code** (matrix in §14), read via `WaitForExit()` + `ExitCode` — robust across UAC account boundaries, no writable-file surface (the v1.1.0 `%TEMP%` result file silently lost results when a standard user elevated as a different admin). Two separate failure scopes with different honest messages: launch failure ("Permission was declined or the helper could not start — nothing was changed") vs readout failure ("couldn't confirm what happened — restart your PC, then run this tool again to check"; never claims nothing changed, because the worker may have completed).
+- **GUI**: stays unelevated for its whole life. Fix/Undo spawn a **hidden elevated worker** (`-Worker Fix|Revert`, `-Verb RunAs -WindowStyle Hidden -PassThru`). The worker communicates back **solely through its process exit code** (matrix in §14), read via `WaitForExit()` + `ExitCode` — robust across UAC account boundaries, no writable-file surface (the v1.1.0 `%TEMP%` result file silently lost results when a standard user elevated as a different admin). Two separate failure scopes with different honest messages: launch failure ("Permission was declined or the helper could not start — nothing was changed") vs readout failure ("couldn't confirm what happened — restart your PC, then run this tool again to check"; never claims nothing changed, because the worker may have completed). The distinction carries through to the verdict label: launch failure returns a `'declined'` sentinel and the handlers show "Nothing was changed" (a known fact — the worker never ran), while readout failure returns `$null` and the verdict honestly says "Could not confirm".
 
 This split keeps the window responsive, avoids running WinForms elevated, and gives the worker a machine-parseable outcome protocol.
 
@@ -211,7 +211,7 @@ flowchart TD
     A[Apply the fix clicked] --> K{Consent dialog: rename, nothing deleted, what you lose, restart}
     K -->|No| X0[Log: nothing was changed]
     K -->|Yes| C[Start-Process -Verb RunAs -PassThru: NvidiaFixTool.ps1 -Worker Fix, hidden]
-    C -->|launch throws| X[Log: permission declined or helper could not start - nothing changed]
+    C -->|launch throws| X[Orange verdict + log: nothing was changed - permission declined or helper could not start]
     C --> D[Worker: detect state FIRST]
     D -->|nodriver/conflict/missing| P[exit 4 / 6 / 5 - no file touched]
     D -->|already fixed| Q[exit 2]

@@ -2,6 +2,7 @@
 
 | Version | Week | Commit Message                  |
 | ------- | ---- | ------------------------------- |
+| `1.2.2` | 1    | Fix declined-UAC verdict: known no-change outcome now shown as such |
 | `1.2.1` | 1    | Fix Apply-handler failure verdicts and unknown-exit-code honesty |
 | `1.2.0` | 1    | Fix 8 review findings: exit-code worker IPC, CIM measurement, conflict state, consent dialog |
 | `1.1.1` | 1    | chore: initialize TRIP workflow |
@@ -10,6 +11,9 @@ Versions `1.0.0` and `1.1.0` predate the TRIP workflow — their record is the g
 
 # Changelog Summary
 
+- **v1.2.2 (Polish Patch - Week 1, 01-08-2026)**:
+  - **Fixes**: Declined-UAC verdict now states the known outcome ("Nothing was changed") via a `'declined'` launch-failure sentinel, distinguished from genuine unknown outcomes ("Could not confirm") — closes the last open observation of the v1.2.x series
+  - **Details**: `docs/2-changelog/w1_v1.2.2.md`
 - **v1.2.1 (Polish Patch - Week 1, 01-08-2026)**:
   - **Fixes**: The two Minor observations left open at v1.2.0 — Apply-handler failure verdicts (no stale "Problem found" above a failure log) and unknown worker exit codes routed to the honest unknown-outcome path
   - **Verification**: Post-release on-hardware checks recorded — elevated RunAs exit-code transport verified end-to-end, owner live GUI pass OK (`docs/4-unit-tests/w1_v1.2.0_test.md`)
