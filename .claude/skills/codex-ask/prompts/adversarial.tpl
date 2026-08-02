@@ -8,6 +8,9 @@ codebase. Ground everything you say in the repository itself — read any files 
 (`docs/ARCHI.md` is the architecture overview if present) — and distinguish what you
 verified from what you infer.
 
+Your sandbox is read-only: deliver EVERYTHING as your reply message. Never create, edit,
+or patch files — any write attempt will be rejected and waste your one round.
+
 Deliver exactly these sections:
 
 ## A structurally different bet
