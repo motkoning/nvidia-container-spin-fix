@@ -280,6 +280,21 @@ For each customized skill, take the **new template** from staging and inject the
 
 After building all merged content in memory, write every file. Do NOT write partial results — complete the full merge first, then write all at once.
 
+### 4.5 Routing Block (CLAUDE.md)
+
+The project's `CLAUDE.md` carries a `## TRIP routing` block — appended by the installer,
+it is what makes TRIP entry automatic and holds the compaction-surviving invariants. The
+canonical current version ships with the staged skills at `TRIP-upgrade/routing-block.md`.
+Reconcile it:
+
+- No `## TRIP routing` heading in the project's CLAUDE.md → append the canonical block
+  verbatim (blank line before it).
+- Block present but its content differs from `routing-block.md` → replace the block with
+  the canonical version. Preserve any lines the project added that have no counterpart in
+  the canonical block (custom routing rules) by re-appending them at the end of the
+  block, and show the user the diff.
+- Never touch anything in CLAUDE.md outside this block.
+
 ---
 
 ## Phase 5: Validate
@@ -298,6 +313,8 @@ If any are found, fill them from context or ask the user.
 
 ### 5.2 Cross-Reference Check
 
+- `CLAUDE.md`'s `## TRIP routing` block matches `TRIP-upgrade/routing-block.md` (plus
+  any preserved project-custom lines)
 - `checklist.md` section names must match `cr-template.md` checklist section names
 - `codex-code-review/prompts/start.tpl` and `resume.tpl` reference `.claude/skills/TRIP-review/checklist.md` — confirm it exists, and that no template still points at the old `TRIP-3-review/` path
 - `codex-code-review/prompts/synthesize.tpl` and `codex-code-review/SKILL.md` reference `.claude/skills/TRIP-review/cr-template.md` — confirm it exists
