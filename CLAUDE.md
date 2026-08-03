@@ -15,3 +15,5 @@
   If you notice yourself directly editing source for planned/feature work, or writing a
   plan nobody reviewed, STOP — you have drifted off the workflow (this happens after
   compaction). Re-open the relevant skill under `.claude/skills/` and re-enter it.
+  Self-check any time: `bash .claude/skills/codex-plan-review/scripts/audit.sh` shows
+  which recent commits trace to worker dispatches (also enforced at the TRIP-3 gate).

@@ -20,6 +20,10 @@ This skill runs after `TRIP-2-implement` has converged (implementation done, tes
 - Testing gate green: affected unit tests pass.
 - Code review converged (`APPROVED`) — Opus 5 reviewer, or the Codex (Sol) fallback loop — or explicitly skipped by the user.
 - Lint and type-check/build green.
+- **Attribution audit clean**: `bash .claude/skills/codex-plan-review/scripts/audit.sh
+  --since <last-release-tag>` (omit `--since` if no tag yet). Every `DRIFT?` line must be
+  either justified to the user (triaged-trivial, or a verified multi-commit integration
+  from one worker thread) or retro-reviewed via `/TRIP-audit` recovery before releasing.
 
 ### Standalone verification (fresh session, not chained from TRIP-2)
 
@@ -146,7 +150,11 @@ git commit -m "<commit message from Step 4>"
 Before committing, `git status -s` and confirm every remaining unstaged/untracked file is
 genuinely unrelated to this release.
 
-**Important**: Only use the commit message. Do NOT add Co-Authored-By or any other trailer.
+**Important**: No Co-Authored-By or tooling trailers — with ONE exception: end the
+message with a `TRIP-Dispatch:` trailer naming the implement thread(s) that produced this
+work (the state key or thread id from `codex-implement/state/`, comma-separated if
+several). It is the declarative dispatch evidence `audit.sh` reads — integration commits
+stop depending on timing correlation. Example: `TRIP-Dispatch: docs/1-plans/F_1.2.0_x.plan.md`.
 
 ## Step 10: Tag
 
